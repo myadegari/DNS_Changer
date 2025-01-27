@@ -1,0 +1,117 @@
+# Load required assemblies
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+
+# Define DNS options
+$dnsOptions = @{
+    "SHEKAN"       = @("178.22.122.100", "185.51.200.2")
+    "403ONLINE"    = @("10.202.10.202", "10.202.10.102")
+    "ELECTRO"      = @("78.157.42.101", "78.157.42.100")
+    "BEGZAR"       = @("185.55.226.26", "185.55.225.25")
+    "RADAR"        = @("10.202.10.10", "10.202.10.11")
+    "SHELTER"      = @("94.103.125.157", "94.103.125.158")
+    "BESHKAN"      = @("181.41.194.177", "181.41.194.186")
+    "PISHGAMAN"    = @("5.202.100.100", "5.202.100.101")
+    "SHATEL"       = @("85.15.1.14", "85.15.1.15")
+    "LEVEL3"       = @("209.244.0.3", "209.244.0.4")
+    "CLOUDFLARE"   = @("1.1.1.1", "1.0.0.1")
+}
+
+# Create the main form
+$form = New-Object System.Windows.Forms.Form
+$form.Text = "DNS Configuration Tool"
+$form.Size = New-Object System.Drawing.Size(410, 330)
+$form.StartPosition = "CenterScreen"
+$form.FormBorderStyle = "FixedDialog"
+$form.MaximizeBox = $false
+
+# Create a label for DNS options
+$labelDNS = New-Object System.Windows.Forms.Label
+$labelDNS.Text = "Select a DNS Option:"
+$labelDNS.Location = New-Object System.Drawing.Point(20, 20)
+$labelDNS.AutoSize = $true
+$form.Controls.Add($labelDNS)
+
+# Create a combo box for DNS options
+$comboDNS = New-Object System.Windows.Forms.ComboBox
+$comboDNS.Location = New-Object System.Drawing.Point(20, 50)
+$comboDNS.Size = New-Object System.Drawing.Size(250, 30)
+$comboDNS.DropDownStyle = "DropDownList"
+$dnsOptions.GetEnumerator() | ForEach-Object { $comboDNS.Items.Add($_.Key) }
+$comboDNS.SelectedIndex = 0
+$form.Controls.Add($comboDNS)
+
+# Create a label for network interfaces
+$labelInterfaces = New-Object System.Windows.Forms.Label
+$labelInterfaces.Text = "Select Network Interface(s):"
+$labelInterfaces.Location = New-Object System.Drawing.Point(20, 100)
+$labelInterfaces.AutoSize = $true
+$form.Controls.Add($labelInterfaces)
+
+# Create a list box for network interfaces
+$listInterfaces = New-Object System.Windows.Forms.ListBox
+$listInterfaces.Location = New-Object System.Drawing.Point(20, 130)
+$listInterfaces.Size = New-Object System.Drawing.Size(250, 150)
+$listInterfaces.SelectionMode = "MultiExtended"
+$interfaces = Get-NetAdapter | Where-Object { $_.Status -eq 'Up' }
+$interfaces | ForEach-Object { $listInterfaces.Items.Add("$($_.Name) (Index: $($_.InterfaceIndex))") }
+$form.Controls.Add($listInterfaces)
+
+# Create a button to set DNS
+$buttonSetDNS = New-Object System.Windows.Forms.Button
+$buttonSetDNS.Text = "Set DNS"
+$buttonSetDNS.Location = New-Object System.Drawing.Point(280, 50)
+$buttonSetDNS.Size = New-Object System.Drawing.Size(100, 30)
+$buttonSetDNS.Add_Click({
+    $selectedDNS = $comboDNS.SelectedItem
+    $selectedInterfaces = $listInterfaces.SelectedItems | ForEach-Object { ($_ -split 'Index: ')[1].TrimEnd(')') }
+    $dnsServers = $dnsOptions[$selectedDNS]
+
+    foreach ($index in $selectedInterfaces) {
+        Set-DnsClientServerAddress -InterfaceIndex $index -ServerAddresses $dnsServers
+        [System.Windows.Forms.MessageBox]::Show("DNS has been set to $selectedDNS ($($dnsServers -join ', ')) on InterfaceIndex $index.", "Success")
+    }
+})
+$form.Controls.Add($buttonSetDNS)
+
+# Create a button to unset DNS
+$buttonUnsetDNS = New-Object System.Windows.Forms.Button
+$buttonUnsetDNS.Text = "Unset DNS"
+$buttonUnsetDNS.Location = New-Object System.Drawing.Point(280, 100)
+$buttonUnsetDNS.Size = New-Object System.Drawing.Size(100, 30)
+$buttonUnsetDNS.Add_Click({
+    $selectedInterfaces = $listInterfaces.SelectedItems | ForEach-Object { ($_ -split 'Index: ')[1].TrimEnd(')') }
+
+    foreach ($index in $selectedInterfaces) {
+        Set-DnsClientServerAddress -InterfaceIndex $index -ResetServerAddresses
+        [System.Windows.Forms.MessageBox]::Show("DNS settings have been cleared on InterfaceIndex $index. Reverted to DHCP.", "Success")
+    }
+})
+$form.Controls.Add($buttonUnsetDNS)
+
+# Create a button to show DNS settings
+$buttonShowDNS = New-Object System.Windows.Forms.Button
+$buttonShowDNS.Text = "Show DNS"
+$buttonShowDNS.Location = New-Object System.Drawing.Point(280, 150)
+$buttonShowDNS.Size = New-Object System.Drawing.Size(100, 30)
+$buttonShowDNS.Add_Click({
+    $upInterfaces = Get-NetAdapter | Where-Object { $_.Status -eq 'Up' }
+    $output = "Current DNS Settings on Up Interfaces:`n`n"
+
+    foreach ($interface in $upInterfaces) {
+        $dnsSettings = Get-DnsClientServerAddress -InterfaceIndex $interface.InterfaceIndex -AddressFamily IPv4
+        $output += "Interface: $($interface.Name) (Index: $($interface.InterfaceIndex))`n"
+        if ($dnsSettings.ServerAddresses) {
+            $output += "DNS Servers: $($dnsSettings.ServerAddresses -join ', ')`n`n"
+        } else {
+            $output += "DNS Servers: None (DHCP)`n`n"
+        }
+    }
+
+    [System.Windows.Forms.MessageBox]::Show($output, "DNS Settings")
+})
+$form.Controls.Add($buttonShowDNS)
+
+# Show the form
+$form.Add_Shown({ $form.Activate() })
+[void] $form.ShowDialog()
