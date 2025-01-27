@@ -19,6 +19,7 @@ To use the CLI version, run `cli.ps1` in PowerShell with administrator privilege
 ![CLI](cli.png)
 
 ## Graphical User Interface (GUI)
+![GUI](gui.png)
 To use the graphical interface, you have two options:
 
 1. Run `app.ps1` in PowerShell with administrator privileges.
