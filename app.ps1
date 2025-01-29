@@ -17,6 +17,13 @@ $dnsOptions = @{
     "CLOUDFLARE"   = @("1.1.1.1", "1.0.0.1")
 }
 
+# Create reverse DNS lookup table
+$reverseDnsLookup = @{}
+foreach ($entry in $dnsOptions.GetEnumerator()) {
+    $key = $entry.Value -join ','
+    $reverseDnsLookup[$key] = $entry.Key
+}
+
 # Create the main form
 $form = New-Object System.Windows.Forms.Form
 $form.Text = "DNS Configuration Tool"
@@ -48,13 +55,29 @@ $labelInterfaces.Location = New-Object System.Drawing.Point(20, 100)
 $labelInterfaces.AutoSize = $true
 $form.Controls.Add($labelInterfaces)
 
-# Create a list box for network interfaces
+# Create a list box for network interfaces (including broadband)
 $listInterfaces = New-Object System.Windows.Forms.ListBox
 $listInterfaces.Location = New-Object System.Drawing.Point(20, 130)
 $listInterfaces.Size = New-Object System.Drawing.Size(250, 150)
 $listInterfaces.SelectionMode = "MultiExtended"
-$interfaces = Get-NetAdapter | Where-Object { $_.Status -eq 'Up' }
-$interfaces | ForEach-Object { $listInterfaces.Items.Add("$($_.Name) (Index: $($_.InterfaceIndex))") }
+
+# Get all active interfaces including broadband connections
+$interfaces = @()
+Get-NetIPInterface | Where-Object {
+    ($_.ConnectionState -eq 'Connected') -or 
+    ($_.InterfaceType -eq 23)  # 23 = PPP (Point-to-Point Protocol)
+} | ForEach-Object {
+    $adapter = Get-NetAdapter -InterfaceIndex $_.ifIndex -ErrorAction SilentlyContinue
+    $interfaces += [PSCustomObject]@{
+        Index = $_.ifIndex
+        Name = if ($adapter) { $adapter.Name } else { "Broadband Connection" }
+        Type = $_.InterfaceType
+    }
+}
+
+$interfaces | Sort-Object Index -Unique | ForEach-Object { 
+    $listInterfaces.Items.Add("$($_.Name) (Index: $($_.Index))") 
+}
 $form.Controls.Add($listInterfaces)
 
 # Create a button to set DNS
@@ -89,22 +112,50 @@ $buttonUnsetDNS.Add_Click({
 })
 $form.Controls.Add($buttonUnsetDNS)
 
-# Create a button to show DNS settings
+# Create a button to show DNS settings with broadband support
 $buttonShowDNS = New-Object System.Windows.Forms.Button
 $buttonShowDNS.Text = "Show DNS"
 $buttonShowDNS.Location = New-Object System.Drawing.Point(280, 150)
 $buttonShowDNS.Size = New-Object System.Drawing.Size(100, 30)
 $buttonShowDNS.Add_Click({
-    $upInterfaces = Get-NetAdapter | Where-Object { $_.Status -eq 'Up' }
-    $output = "Current DNS Settings on Up Interfaces:`n`n"
+    $output = "Current DNS Settings:`n`n"
+    
+    # Get all active interfaces including broadband
+    $allInterfaces = @()
+    Get-NetIPInterface | Where-Object {
+        ($_.ConnectionState -eq 'Connected') -or 
+        ($_.InterfaceType -eq 23)  # PPP interfaces
+    } | ForEach-Object {
+        $adapter = Get-NetAdapter -InterfaceIndex $_.ifIndex -ErrorAction SilentlyContinue
+        $allInterfaces += [PSCustomObject]@{
+            Index = $_.ifIndex
+            Name = if ($adapter) { $adapter.Name } else { "Broadband Connection" }
+            Type = $_.InterfaceType
+        }
+    }
 
-    foreach ($interface in $upInterfaces) {
-        $dnsSettings = Get-DnsClientServerAddress -InterfaceIndex $interface.InterfaceIndex -AddressFamily IPv4
-        $output += "Interface: $($interface.Name) (Index: $($interface.InterfaceIndex))`n"
-        if ($dnsSettings.ServerAddresses) {
-            $output += "DNS Servers: $($dnsSettings.ServerAddresses -join ', ')`n`n"
-        } else {
-            $output += "DNS Servers: None (DHCP)`n`n"
+    foreach ($interface in $allInterfaces | Sort-Object Index -Unique) {
+        try {
+            $dnsSettings = Get-DnsClientServerAddress -InterfaceIndex $interface.Index -AddressFamily IPv4 -ErrorAction Stop
+            $output += "Interface: $($interface.Name) (Index: $($interface.Index))`n"
+            
+            if ($dnsSettings.ServerAddresses) {
+                $addressString = $dnsSettings.ServerAddresses -join ','
+                $dnsName = $reverseDnsLookup[$addressString]
+                
+                $output += if ($dnsName) {
+                    "DNS Servers: $dnsName ($addressString)`n`n"
+                } else {
+                    "DNS Servers: $($dnsSettings.ServerAddresses -join ', ')`n`n"
+                }
+            }
+            else {
+                $output += "DNS Servers: None (DHCP)`n`n"
+            }
+        }
+        catch {
+            $output += "Interface: $($interface.Name) (Index: $($interface.Index))`n"
+            $output += "DNS Servers: [Error reading settings]`n`n"
         }
     }
 
